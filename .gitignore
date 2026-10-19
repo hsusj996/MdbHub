@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+TestResults/
+
+# IDE / user files
+.vs/
+*.user
+*.suo
+
+# Access lock files
+*.ldb
+*.laccdb
+
+# Local app settings (see mdbhub.config.example.json)
+mdbhub.config.json
+mdbhub.config.json.bak
+mdbhub.config.json.tmp
+
+# Samples: only the small ones are committed. Recreate the rest with tools/MdbHub.SampleGen (see README).
+samples/sample_max.mdb
+samples/*.bak.mdb
+samples/sample_a_after_max_apply.mdb

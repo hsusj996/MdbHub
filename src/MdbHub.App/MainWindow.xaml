@@ -1,0 +1,24 @@
+﻿<Window x:Class="MdbHub.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+        xmlns:views="clr-namespace:MdbHub.App.Views"
+        Title="MdbHub - mdb 통합 관리" Height="760" Width="1180" MinHeight="560" MinWidth="900">
+    <telerik:RadTabControl Margin="4">
+        <telerik:RadTabItem Header="조회">
+            <views:BrowseView DataContext="{Binding Browse}" />
+        </telerik:RadTabItem>
+        <telerik:RadTabItem Header="추출">
+            <views:ExtractView DataContext="{Binding Extract}" />
+        </telerik:RadTabItem>
+        <telerik:RadTabItem Header="반영">
+            <views:ApplyView DataContext="{Binding Apply}" />
+        </telerik:RadTabItem>
+        <telerik:RadTabItem Header="비교">
+            <views:CompareView DataContext="{Binding Compare}" />
+        </telerik:RadTabItem>
+        <telerik:RadTabItem Header="설정">
+            <views:SettingsView DataContext="{Binding Settings}" />
+        </telerik:RadTabItem>
+    </telerik:RadTabControl>
+</Window>

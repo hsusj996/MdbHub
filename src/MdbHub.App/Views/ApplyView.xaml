@@ -1,0 +1,51 @@
+<UserControl x:Class="MdbHub.App.Views.ApplyView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <telerik:RadButton DockPanel.Dock="Left" Content="반영할 mdb..." Command="{Binding BrowsePatchCommand}" Padding="12,4" Width="130" />
+            <TextBox Text="{Binding PatchPath, UpdateSourceTrigger=PropertyChanged}" Margin="8,0,0,0" VerticalContentAlignment="Center" />
+        </DockPanel>
+        <DockPanel Grid.Row="1" Margin="0,0,0,8">
+            <telerik:RadButton DockPanel.Dock="Left" Content="대상 mdb..." Command="{Binding BrowseTargetCommand}" Padding="12,4" Width="130" />
+            <TextBox Text="{Binding TargetPath, UpdateSourceTrigger=PropertyChanged}" Margin="8,0,0,0" VerticalContentAlignment="Center" />
+        </DockPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="방식" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox Width="380" ItemsSource="{Binding Modes}" DisplayMemberPath="Label" SelectedValuePath="Mode" SelectedValue="{Binding Mode}" />
+            <CheckBox Content="반영 전 대상 파일 백업" IsChecked="{Binding MakeBackup}" VerticalAlignment="Center" Margin="16,0,0,0" />
+            <telerik:RadButton Content="미리보기" Command="{Binding PreviewCommand}" Padding="16,4" Margin="16,0,0,0" />
+            <telerik:RadButton Content="반영 실행" Command="{Binding ApplyCommand}" Padding="16,4" Margin="8,0,0,0" FontWeight="Bold" />
+        </StackPanel>
+
+        <telerik:RadGridView Grid.Row="3" ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                             ShowGroupPanel="False" CanUserFreezeColumns="False" RowIndicatorVisibility="Collapsed">
+            <telerik:RadGridView.Columns>
+                <telerik:GridViewDataColumn Header="테이블" DataMemberBinding="{Binding Table}" Width="180" />
+                <telerik:GridViewDataColumn Header="행을 구분하는 키 (출처)" DataMemberBinding="{Binding Key}" Width="*" />
+                <telerik:GridViewDataColumn Header="삽입" DataMemberBinding="{Binding Inserts}" Width="110" DataFormatString="{}{0:N0}" TextAlignment="Right" />
+                <telerik:GridViewDataColumn Header="덮어쓰기" DataMemberBinding="{Binding Updates}" Width="110" DataFormatString="{}{0:N0}" TextAlignment="Right" />
+                <telerik:GridViewDataColumn Header="동일(변경 없음)" DataMemberBinding="{Binding Unchanged}" Width="130" DataFormatString="{}{0:N0}" TextAlignment="Right" />
+            </telerik:RadGridView.Columns>
+        </telerik:RadGridView>
+
+        <TextBlock Grid.Row="4" Text="{Binding Summary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+
+        <Border Grid.RowSpan="5" Background="#99FFFFFF" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="처리 중..." FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+    </Grid>
+</UserControl>

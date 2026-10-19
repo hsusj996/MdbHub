@@ -1,0 +1,20 @@
+{
+  // Copy to "mdbhub.config.json" next to MdbHub.App.exe (the app creates a default one on first start).
+  "version": 1,
+
+  // Key columns per table: how compare/apply recognise "the same row".
+  // Tables not listed here use the mdb's declared primary key; if there is none, the app asks and saves your answer here.
+  // "ignore": true leaves a table out of compare/apply.
+  "tables": {
+    "TB_SPEC_01": { "key": ["CHEMICAL_NO", "SUB_CHEMICAL_NO", "NUM"] },
+    "TB_ALT":     { "key": ["ID", "SUB_CHEMICAL_NO", "NUM"] },
+    "TB_CODE":    { "ignore": true }
+  },
+
+  // Extract filters. The columns of one filter are aliases for the same thing
+  // (a table that has none of them is skipped, a table that has several uses the first).
+  "filters": [
+    { "name": "약액번호", "columns": ["CHEMICAL_NO", "ID"] },
+    { "name": "서브번호", "columns": ["SUB_CHEMICAL_NO"] }
+  ]
+}

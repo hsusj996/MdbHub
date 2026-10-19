@@ -1,0 +1,115 @@
+<UserControl x:Class="MdbHub.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock>
+                <Run Text="설정 파일:" FontWeight="Bold" />
+                <Run Text="{Binding Path, Mode=OneWay}" />
+            </TextBlock>
+            <TextBlock Text="{Binding LoadError}" Foreground="#FFB00020" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock Foreground="#FF666666" TextWrapping="Wrap" Margin="0,4,0,0"
+                       Text="테이블의 키: 반영·비교에서 행을 구분하는 컬럼입니다. 여기에 없는 테이블은 mdb의 기본 키를 쓰고, 그것도 없으면 처음 쓸 때 물어봅니다. 컬럼은 쉼표로 구분하세요." />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- table rules -->
+            <DockPanel Grid.Column="0">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <telerik:RadButton DockPanel.Dock="Right" Content="+ 테이블 추가" Command="{Binding AddTableCommand}" Padding="10,2" />
+                    <TextBlock Text="테이블별 키" FontWeight="Bold" VerticalAlignment="Center" />
+                </DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="30" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="테이블 이름" Foreground="#FF666666" />
+                    <TextBlock Grid.Column="1" Text="키 컬럼" Foreground="#FF666666" Margin="6,0,0,0" />
+                    <TextBlock Grid.Column="2" Text="사용 안 함" Foreground="#FF666666" Margin="6,0,0,0" />
+                </Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding TableRules}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="170" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="30" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Grid.Column="1" Margin="6,0,0,0" Text="{Binding KeyText, UpdateSourceTrigger=PropertyChanged}" />
+                                    <CheckBox Grid.Column="2" Margin="10,0,0,0" VerticalAlignment="Center" IsChecked="{Binding Ignore}" />
+                                    <Button Grid.Column="3" Content="✕" ToolTip="이 줄 삭제"
+                                            Command="{Binding DataContext.RemoveTableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+
+            <!-- filters -->
+            <DockPanel Grid.Column="2">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <telerik:RadButton DockPanel.Dock="Right" Content="+ 필터 추가" Command="{Binding AddFilterCommand}" Padding="10,2" />
+                    <TextBlock Text="추출 필터" FontWeight="Bold" VerticalAlignment="Center" />
+                </DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="30" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="필터 이름" Foreground="#FF666666" />
+                    <TextBlock Grid.Column="1" Text="같은 의미의 컬럼 (테이블마다 이름이 다르면 여러 개)" Foreground="#FF666666" Margin="6,0,0,0" />
+                </Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Filters}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="30" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBox Grid.Column="1" Margin="6,0,0,0" Text="{Binding ColumnsText, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="2" Content="✕" ToolTip="이 줄 삭제"
+                                            Command="{Binding DataContext.RemoveFilterCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Grid>
+
+        <DockPanel Grid.Row="2" Margin="0,10,0,0">
+            <telerik:RadButton DockPanel.Dock="Left" Content="저장" Command="{Binding SaveCommand}" Padding="24,4" FontWeight="Bold" />
+            <telerik:RadButton DockPanel.Dock="Left" Content="파일에서 다시 읽기" Command="{Binding ReloadCommand}" Padding="12,4" Margin="8,0,0,0"
+                               ToolTip="저장하지 않은 편집 내용은 버려집니다. 메모장으로 파일을 고쳤을 때 쓰세요." />
+            <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Margin="12,0,0,0" />
+        </DockPanel>
+    </Grid>
+</UserControl>
