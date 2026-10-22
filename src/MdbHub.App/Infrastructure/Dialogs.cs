@@ -19,7 +19,11 @@ public static class Dialogs
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
-    public static void Error(string message) => MessageBox.Show(Trim(message), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+    /// <summary>How errors are shown; replaced in automated checks so no modal box waits for a click.</summary>
+    public static Action<string> ErrorHandler { get; set; } =
+        message => MessageBox.Show(Trim(message), "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+
+    public static void Error(string message) => ErrorHandler(message);
 
     public static void Info(string message) => MessageBox.Show(message, "MdbHub", MessageBoxButton.OK, MessageBoxImage.Information);
 

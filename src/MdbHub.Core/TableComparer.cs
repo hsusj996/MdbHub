@@ -26,19 +26,7 @@ public static class TableComparer
     /// <param name="rightName">How the right side is called in error messages.</param>
     public static TableDiff Compare(TableData left, TableData right, string leftName = "왼쪽", string rightName = "오른쪽")
     {
-        var pk = left.Schema.PrimaryKey;
-        if (pk.Count == 0)
-            throw new InvalidOperationException($"테이블 '{left.Schema.Name}'에 키가 없어 비교할 수 없습니다.");
-
-        var rightIndex = left.Schema.Columns.Select(c => right.Schema.IndexOf(c.Name)).ToArray();
-        if (rightIndex.Any(i => i < 0) || pk.Any(k => !right.Schema.HasColumn(k)))
-            throw new InvalidOperationException($"테이블 '{left.Schema.Name}'의 컬럼이 두 파일에서 다릅니다.");
-
-        var leftKeyIdx = pk.Select(left.Schema.IndexOf).ToArray();
-        var rightKeyIdx = pk.Select(right.Schema.IndexOf).ToArray();
-
-        EnsureUniqueKeys(left, leftKeyIdx, leftName);
-        EnsureUniqueKeys(right, rightKeyIdx, rightName);
+        var (rightIndex, leftKeyIdx, rightKeyIdx) = PrepareKeys(left, right, leftName, rightName);
 
         var rightRows = right.Rows.ToDictionary(r => KeyOf(r, rightKeyIdx));
         var diffs = new List<RowDiff>();
@@ -67,6 +55,29 @@ public static class TableComparer
         return new TableDiff(left.Schema.Name, diffs, unchanged);
     }
 
+    /// <summary>
+    /// Shared checks of <see cref="Compare"/> and <see cref="TableAligner"/>: the left schema has a key, the right table has every
+    /// column, and neither side has duplicate keys. Returns, for each left column, its index in the right table, plus both key index lists.
+    /// </summary>
+    internal static (int[] RightIndex, int[] LeftKeyIdx, int[] RightKeyIdx) PrepareKeys(
+        TableData left, TableData right, string leftName, string rightName)
+    {
+        var pk = left.Schema.PrimaryKey;
+        if (pk.Count == 0)
+            throw new InvalidOperationException($"테이블 '{left.Schema.Name}'에 키가 없어 비교할 수 없습니다.");
+
+        var rightIndex = left.Schema.Columns.Select(c => right.Schema.IndexOf(c.Name)).ToArray();
+        if (rightIndex.Any(i => i < 0) || pk.Any(k => !right.Schema.HasColumn(k)))
+            throw new InvalidOperationException($"테이블 '{left.Schema.Name}'의 컬럼이 두 파일에서 다릅니다.");
+
+        var leftKeyIdx = pk.Select(left.Schema.IndexOf).ToArray();
+        var rightKeyIdx = pk.Select(right.Schema.IndexOf).ToArray();
+
+        EnsureUniqueKeys(left, leftKeyIdx, leftName);
+        EnsureUniqueKeys(right, rightKeyIdx, rightName);
+        return (rightIndex, leftKeyIdx, rightKeyIdx);
+    }
+
     private static void EnsureUniqueKeys(TableData data, int[] keyIdx, string sideName)
     {
         var seen = new HashSet<string>();
@@ -85,9 +96,9 @@ public static class TableComparer
     private static string KeyOf(object?[] row, int[] idx) =>
         string.Join('\u001f', idx.Select(i => Convert.ToString(row[i], System.Globalization.CultureInfo.InvariantCulture)));
 
-    private static object?[] KeyValues(object?[] row, int[] idx) => idx.Select(i => row[i]).ToArray();
+    internal static object?[] KeyValues(object?[] row, int[] idx) => idx.Select(i => row[i]).ToArray();
 
-    private static bool ValueEquals(object? a, object? b) => (a, b) switch
+    internal static bool ValueEquals(object? a, object? b) => (a, b) switch
     {
         (null, null) => true,
         (null, _) or (_, null) => false,
