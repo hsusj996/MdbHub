@@ -17,6 +17,10 @@ mdbhub.config.json
 mdbhub.config.json.bak
 mdbhub.config.json.tmp
 
+# Change logs written next to an mdb after an apply (hand edits) or a merge save
+*.edits.csv
+*.merge.csv
+
 # Samples: only the small ones are committed. Recreate the rest with tools/MdbHub.SampleGen (see README).
 samples/sample_max.mdb
 samples/*.bak.mdb

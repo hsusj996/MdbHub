@@ -143,6 +143,27 @@ public class CompareCoreTests
     }
 
     [Fact]
+    public void TableAligner_FromDiff_KeepsOnlyDifferingRowsInKeyOrder_AndMapsColumnsToLeftOrder()
+    {
+        var leftSchema = new TableSchema("T", [new("K", "Integer"), new("A", "Integer"), new("B", "Integer")], ["K"]);
+        var rightSchema = new TableSchema("T", [new("B", "Integer"), new("K", "Integer"), new("A", "Integer")], ["K"]);
+        var left = Data(leftSchema, [1, 10, 20], [2, 11, 21], [9, 99, 99]);          // 9 exists only on the left
+        var right = Data(rightSchema, [20, 1, 10], [22, 2, 11], [30, 5, 50]);         // 1 same, 2 changed (B), 5 new
+
+        var diff = TableComparer.Compare(left, right);
+        var lines = TableAligner.FromDiff(diff, leftSchema, rightSchema, includeLeftOnly: false);
+
+        Assert.Equal([AlignKind.Changed, AlignKind.RightOnly], lines.Select(l => l.Kind));
+        Assert.Equal([2, 11, 22], lines[0].Right);   // right row re-ordered to K, A, B
+        Assert.Equal([2], lines[0].ChangedColumns);   // column B
+        Assert.Equal([5, 50, 30], lines[1].Right);
+        Assert.Null(lines[1].Left);
+
+        var withLeftOnly = TableAligner.FromDiff(diff, leftSchema, rightSchema);
+        Assert.Equal([AlignKind.Changed, AlignKind.RightOnly, AlignKind.LeftOnly], withLeftOnly.Select(l => l.Kind));   // key order 2, 5, 9
+    }
+
+    [Fact]
     public void TableAligner_AgreesWithTableComparerOnCounts()
     {
         var s = Table("T", "K", "V");

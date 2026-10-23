@@ -25,10 +25,17 @@ public static class Dialogs
 
     public static void Error(string message) => ErrorHandler(message);
 
-    public static void Info(string message) => MessageBox.Show(message, "MdbHub", MessageBoxButton.OK, MessageBoxImage.Information);
+    /// <summary>How notices are shown; replaced in automated checks.</summary>
+    public static Action<string> InfoHandler { get; set; } =
+        message => MessageBox.Show(message, "MdbHub", MessageBoxButton.OK, MessageBoxImage.Information);
 
-    public static bool Confirm(string message) =>
-        MessageBox.Show(message, "확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+    /// <summary>How yes/no questions are asked (the default answer is No); replaced in automated checks.</summary>
+    public static Func<string, bool> ConfirmHandler { get; set; } =
+        message => MessageBox.Show(message, "확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+
+    public static void Info(string message) => InfoHandler(message);
+
+    public static bool Confirm(string message) => ConfirmHandler(message);
 
     private static string Trim(string message) => message.Length <= 1500 ? message : message[..1500] + Environment.NewLine + "...";
 }

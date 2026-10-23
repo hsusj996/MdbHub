@@ -19,6 +19,66 @@ public sealed record TableApplyPlan(TableSchema Source, TableSchema Target, Tabl
     public int Inserts => Diff.Rows.Count(r => r.Kind == RowDiffKind.Added);
     public int Updates => Diff.Rows.Count(r => r.Kind == RowDiffKind.Changed);
     public int Unchanged => Diff.UnchangedCount;
+
+    internal TableApplyPlan WithEdits(IReadOnlyList<CellEdit> edits)
+    {
+        if (edits.Count == 0) return this;
+
+        var keyColumns = Target.PrimaryKey.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byRow = edits.GroupBy(e => RowKey.Of(e.Key)).ToDictionary(g => g.Key, g => g.ToList());
+        var used = new HashSet<string>();
+        var rows = new List<RowDiff>(Diff.Rows.Count);
+        var unchanged = Diff.UnchangedCount;
+
+        foreach (var row in Diff.Rows)
+        {
+            var key = RowKey.Of(row.Key);
+            if (row.Kind == RowDiffKind.Removed || !byRow.TryGetValue(key, out var rowEdits))
+            {
+                rows.Add(row);
+                continue;
+            }
+            used.Add(key);
+
+            var right = (object?[])row.Right!.Clone();
+            foreach (var edit in rowEdits)
+            {
+                if (keyColumns.Contains(edit.Column))
+                    throw new InvalidOperationException($"[{Target.Name}] 키 컬럼 '{edit.Column}'은(는) 수정할 수 없습니다.");
+                var index = Source.IndexOf(edit.Column);
+                if (index < 0)
+                    throw new InvalidOperationException($"[{Target.Name}] 수정한 컬럼 '{edit.Column}'이(가) 없습니다.");
+                if (!TableComparer.ValueEquals(right[index], edit.OldValue))
+                    throw new InvalidOperationException(
+                        $"[{Target.Name}] 키 ({string.Join(", ", row.Key)})의 '{edit.Column}' 값이 수정할 때와 달라졌습니다. 반영할 파일이 바뀌었을 수 있으니 미리보기를 다시 만드세요.");
+                right[index] = edit.NewValue;
+            }
+
+            if (row.Kind == RowDiffKind.Added)
+            {
+                rows.Add(row with { Right = right });
+                continue;
+            }
+
+            // An overwrite: recompute which columns still differ from the target after the edits.
+            var changed = new List<string>();
+            for (var i = 0; i < Target.Columns.Count; i++)
+            {
+                var name = Target.Columns[i].Name;
+                var sourceIndex = Source.IndexOf(name);
+                if (sourceIndex >= 0 && !TableComparer.ValueEquals(row.Left![i], right[sourceIndex])) changed.Add(name);
+            }
+            if (changed.Count == 0) unchanged++;
+            else rows.Add(row with { Right = right, ChangedColumns = changed });
+        }
+
+        var missing = byRow.Keys.FirstOrDefault(k => !used.Contains(k));
+        if (missing is not null)
+            throw new InvalidOperationException(
+                $"[{Target.Name}] 수정한 행(키 {string.Join(", ", byRow[missing][0].Key)})이(가) 미리보기에 없습니다. 반영할 파일이 바뀌었을 수 있으니 미리보기를 다시 만드세요.");
+
+        return this with { Diff = new TableDiff(Diff.Table, rows, unchanged) };
+    }
 }
 
 /// <param name="SkippedTablesWithoutPrimaryKey">Patch tables that have no usable key (neither configured nor declared) and were left out. Tables the config says to ignore are not listed.</param>
@@ -30,10 +90,31 @@ public sealed record ApplyPlan(
 {
     public int TotalInserts => Tables.Sum(t => t.Inserts);
     public int TotalUpdates => Tables.Sum(t => t.Updates);
+
+    /// <summary>
+    /// The plan as it becomes when the user's hand edits are applied to the patch rows (the patch file itself is untouched).
+    /// An overwrite whose edited values end up equal to the target counts as unchanged. Throws <see cref="InvalidOperationException"/>
+    /// when an edit cannot be applied: it targets a key column, an unknown column or row, or the patch value is no longer what was edited.
+    /// </summary>
+    public ApplyPlan WithEdits(IReadOnlyList<CellEdit>? edits)
+    {
+        if (edits is null || edits.Count == 0) return this;
+
+        var unknownTable = edits.Select(e => e.Table).Distinct(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(t => !Tables.Any(p => string.Equals(p.Target.Name, t, StringComparison.OrdinalIgnoreCase)));
+        if (unknownTable is not null)
+            throw new InvalidOperationException($"수정한 테이블 '{unknownTable}'이(가) 반영 대상에 없습니다. 미리보기를 다시 만드세요.");
+
+        return this with
+        {
+            Tables = Tables.Select(t => t.WithEdits(edits.Where(e => string.Equals(e.Table, t.Target.Name, StringComparison.OrdinalIgnoreCase)).ToList())).ToList(),
+        };
+    }
 }
 
 /// <param name="BackupPath">Null when nothing needed to change or the backup was turned off.</param>
-public sealed record ApplyResult(ApplyPlan Plan, string? BackupPath);
+/// <param name="EditLogPath">The file listing the hand-edited values that were applied; null when there were none.</param>
+public sealed record ApplyResult(ApplyPlan Plan, string? BackupPath, string? EditLogPath = null);
 
 public static class MdbApplier
 {
@@ -93,9 +174,12 @@ public static class MdbApplier
     /// Validates the schema, checks the mode, backs up the target (unless disabled), then applies every change in one transaction.
     /// Any failure rolls the whole change back.
     /// </summary>
-    public static ApplyResult Apply(string sourcePath, string targetPath, ApplyMode mode = ApplyMode.Upsert, bool backup = true, AppConfig? config = null)
+    /// <param name="edits">Values the user changed by hand in the preview; they are applied to the patch rows in memory (the patch file is not modified)
+    /// and listed in an ".edits.csv" file next to the target after a successful apply.</param>
+    public static ApplyResult Apply(string sourcePath, string targetPath, ApplyMode mode = ApplyMode.Upsert, bool backup = true, AppConfig? config = null,
+        IReadOnlyList<CellEdit>? edits = null)
     {
-        var plan = Preview(sourcePath, targetPath, config);
+        var plan = Preview(sourcePath, targetPath, config).WithEdits(edits);
 
         if (mode == ApplyMode.InsertOnly && plan.TotalUpdates > 0)
             throw new InvalidOperationException($"이미 존재하는 행 {plan.TotalUpdates}개가 달라서 삽입 전용 모드로 진행할 수 없습니다.");
@@ -123,33 +207,22 @@ public static class MdbApplier
             tx.Rollback();
             throw;
         }
-        return new ApplyResult(plan, backupPath);
+
+        // The data is committed by now, so a log that cannot be written must not turn the apply into a failure.
+        string? editLog = null;
+        if (edits is { Count: > 0 })
+        {
+            try { editLog = EditLog.Write(targetPath, edits, DateTime.Now); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return new ApplyResult(plan, backupPath, editLog);
     }
 
-    private static void Insert(OleDbConnection conn, OleDbTransaction tx, TableApplyPlan table, RowDiff row)
-    {
-        var columns = table.Source.Columns.Select(c => c.Name).ToList();
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = $"INSERT INTO {MdbFile.Quote(table.Target.Name)} ({string.Join(", ", columns.Select(MdbFile.Quote))}) " +
-                          $"VALUES ({string.Join(", ", columns.Select(_ => "?"))})";
-        foreach (var value in row.Right!) cmd.Parameters.AddWithValue("?", value ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
-    }
+    private static void Insert(OleDbConnection conn, OleDbTransaction tx, TableApplyPlan table, RowDiff row) =>
+        RowWriter.Insert(conn, tx, table.Target.Name, table.Source.Columns.Select(c => c.Name).ToList(), row.Right!);
 
-    private static void Update(OleDbConnection conn, OleDbTransaction tx, TableApplyPlan table, RowDiff row)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = $"UPDATE {MdbFile.Quote(table.Target.Name)} " +
-                          $"SET {string.Join(", ", row.ChangedColumns.Select(c => MdbFile.Quote(c) + " = ?"))} " +
-                          $"WHERE {string.Join(" AND ", table.Target.PrimaryKey.Select(k => MdbFile.Quote(k) + " = ?"))}";
-
-        foreach (var column in row.ChangedColumns)
-            cmd.Parameters.AddWithValue("?", row.Right![table.Source.IndexOf(column)] ?? DBNull.Value);
-        foreach (var key in row.Key) cmd.Parameters.AddWithValue("?", key ?? DBNull.Value);
-
-        if (cmd.ExecuteNonQuery() != 1)
-            throw new InvalidOperationException($"[{table.Target.Name}] PK ({string.Join(", ", row.Key)}) 수정 대상이 1건이 아닙니다.");
-    }
+    private static void Update(OleDbConnection conn, OleDbTransaction tx, TableApplyPlan table, RowDiff row) =>
+        RowWriter.Update(conn, tx, table.Target.Name, table.Target.PrimaryKey, row.Key,
+            row.ChangedColumns, row.ChangedColumns.Select(c => row.Right![table.Source.IndexOf(c)]).ToList());
 }

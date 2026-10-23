@@ -1,0 +1,54 @@
+<UserControl x:Class="MdbHub.App.Views.SideBySideView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:telerik="http://schemas.telerik.com/2008/xaml/presentation"
+             xmlns:local="clr-namespace:MdbHub.App.Views"
+             x:Name="Root">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- merge buttons: the left grid's arrow copies the line to the right, the right grid's arrow copies it to the left -->
+        <DataTemplate x:Key="CopyToRightTemplate">
+            <Button Content="→" Padding="6,0" FontWeight="Bold" ToolTip="이 줄을 오른쪽으로 복사 (오른쪽을 왼쪽과 같게 만듭니다)"
+                    Command="{Binding CopyToRightCommand, RelativeSource={RelativeSource AncestorType={x:Type local:SideBySideView}}}"
+                    CommandParameter="{Binding}"
+                    Visibility="{Binding CanCopyToRight, Converter={StaticResource BoolToVis}}" />
+        </DataTemplate>
+        <DataTemplate x:Key="CopyToLeftTemplate">
+            <Button Content="←" Padding="6,0" FontWeight="Bold" ToolTip="이 줄을 왼쪽으로 복사 (왼쪽을 오른쪽과 같게 만듭니다)"
+                    Command="{Binding CopyToLeftCommand, RelativeSource={RelativeSource AncestorType={x:Type local:SideBySideView}}}"
+                    CommandParameter="{Binding}"
+                    Visibility="{Binding CanCopyToLeft, Converter={StaticResource BoolToVis}}" />
+        </DataTemplate>
+        <DataTemplate x:Key="PendingTemplate">
+            <TextBlock Text="{Binding PendingMark}" Foreground="#FF1E5FA8" FontWeight="Bold" HorizontalAlignment="Center" ToolTip="저장하면 이 줄이 이 파일에 기록됩니다" />
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="6" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding LeftTitle, ElementName=Root}" FontWeight="Bold" Margin="2,0,0,4" TextTrimming="CharacterEllipsis" />
+        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding RightTitle, ElementName=Root}" FontWeight="Bold" Margin="2,0,0,4" TextTrimming="CharacterEllipsis" />
+
+        <telerik:RadGridView x:Name="LeftGrid" Grid.Row="1" Grid.Column="0"
+                             AutoGenerateColumns="False" IsReadOnly="True" ShowGroupPanel="False" SelectionMode="Single"
+                             CanUserSortColumns="False" IsFilteringAllowed="False" CanUserReorderColumns="False"
+                             CanUserFreezeColumns="False" RowIndicatorVisibility="Collapsed"
+                             RowLoaded="Grid_RowLoaded" CellLoaded="Grid_CellLoaded" SelectionChanged="LeftGrid_SelectionChanged"
+                             BeginningEdit="Grid_BeginningEdit" CellValidating="Grid_CellValidating" CellEditEnded="Grid_CellEditEnded" />
+        <telerik:RadGridView x:Name="RightGrid" Grid.Row="1" Grid.Column="2"
+                             AutoGenerateColumns="False" IsReadOnly="True" ShowGroupPanel="False" SelectionMode="Single"
+                             CanUserSortColumns="False" IsFilteringAllowed="False" CanUserReorderColumns="False"
+                             CanUserFreezeColumns="False" RowIndicatorVisibility="Collapsed"
+                             RowLoaded="Grid_RowLoaded" CellLoaded="Grid_CellLoaded" SelectionChanged="RightGrid_SelectionChanged"
+                             BeginningEdit="Grid_BeginningEdit" CellValidating="Grid_CellValidating" CellEditEnded="Grid_CellEditEnded" />
+    </Grid>
+</UserControl>

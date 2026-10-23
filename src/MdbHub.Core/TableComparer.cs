@@ -98,7 +98,7 @@ public static class TableComparer
 
     internal static object?[] KeyValues(object?[] row, int[] idx) => idx.Select(i => row[i]).ToArray();
 
-    internal static bool ValueEquals(object? a, object? b) => (a, b) switch
+    public static bool ValueEquals(object? a, object? b) => (a, b) switch
     {
         (null, null) => true,
         (null, _) or (_, null) => false,
