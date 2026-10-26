@@ -20,6 +20,27 @@ public sealed record DatabaseSchema(IReadOnlyList<TableSchema> Tables)
 /// <summary>Rows are stored in the column order of <see cref="Schema"/>; DBNull is normalized to null.</summary>
 public sealed record TableData(TableSchema Schema, IReadOnlyList<object?[]> Rows);
 
+/// <summary>One combination of values of several columns, e.g. (CHEMICAL_NO, SUB_CHEMICAL_NO) = (100, 1); shows as "100 | 1".</summary>
+public sealed record CombinationValue(IReadOnlyList<object> Values)
+{
+    public override string ToString() =>
+        string.Join(" | ", Values.Select(v => Convert.ToString(v, System.Globalization.CultureInfo.CurrentCulture)));
+}
+
+/// <summary>
+/// Keeps only rows whose values in <see cref="Columns"/>, taken together, form one of <see cref="Combinations"/>
+/// (so choosing (100,1) and (200,2) never lets (100,2) through, as two separate filters would).
+/// A table is only affected if it has every column; one that lacks any is left out of an extract.
+/// With <see cref="Combinations"/> null it only requires the columns to exist and restricts nothing else.
+/// </summary>
+public sealed record CombinationFilter(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<object>>? Combinations)
+{
+    public bool AppliesTo(TableSchema table) => Columns.All(table.HasColumn);
+
+    /// <summary>The table's own spelling of each column, in the order of <see cref="Columns"/>.</summary>
+    public IReadOnlyList<string> ResolveIn(TableSchema table) => Columns.Select(c => table.Columns[table.IndexOf(c)].Name).ToList();
+}
+
 /// <summary>
 /// Keeps only rows whose column value is one of <see cref="Values"/>. <see cref="Columns"/> are aliases for the same
 /// concept (e.g. CHEMICAL_NO and ID): each table uses the first alias it actually has.

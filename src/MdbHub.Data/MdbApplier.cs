@@ -11,6 +11,36 @@ public enum ApplyMode
     InsertOnly,
 }
 
+public enum TableScopeChoice
+{
+    /// <summary>Apply nothing of this table.</summary>
+    Exclude,
+    /// <summary>Apply this table's rows whatever their group.</summary>
+    IncludeAll,
+}
+
+/// <summary>
+/// Limits an apply to chosen groups of rows. A group is one combination of values of <see cref="Columns"/>, which must be key columns
+/// (e.g. CHEMICAL_NO + SUB_CHEMICAL_NO, or just CHEM_ID: the caller picks them). Tables whose key lacks any of those columns cannot be
+/// grouped, so a decision is needed for each of them in <see cref="OtherTables"/>.
+/// </summary>
+public sealed class ApplyScope(IReadOnlyList<string> columns, IReadOnlySet<string> selectedGroups, IReadOnlyDictionary<string, TableScopeChoice>? otherTables = null)
+{
+    public IReadOnlyList<string> Columns { get; } = columns;
+
+    /// <summary>The groups to apply, as <see cref="RowKey.Of"/> texts of their values (in the order of <see cref="Columns"/>).</summary>
+    public IReadOnlySet<string> SelectedGroups { get; } = selectedGroups;
+
+    public IReadOnlyDictionary<string, TableScopeChoice> OtherTables { get; } =
+        new Dictionary<string, TableScopeChoice>(otherTables ?? new Dictionary<string, TableScopeChoice>(), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>No columns means no limit: everything is applied.</summary>
+    public bool IsActive => Columns.Count > 0;
+}
+
+/// <summary>One group of rows (a combination of values) in a plan, with how much of the plan belongs to it.</summary>
+public sealed record ScopeGroup(CombinationValue Value, string Key, int Inserts, int Updates, int Tables);
+
 /// <param name="Source">Table schema in the patch mdb.</param>
 /// <param name="Target">Table schema in the mdb being modified.</param>
 /// <param name="Diff">Left = target, Right = source: Added = to insert, Changed = to overwrite. Target-only rows are left alone.</param>
@@ -19,6 +49,30 @@ public sealed record TableApplyPlan(TableSchema Source, TableSchema Target, Tabl
     public int Inserts => Diff.Rows.Count(r => r.Kind == RowDiffKind.Added);
     public int Updates => Diff.Rows.Count(r => r.Kind == RowDiffKind.Changed);
     public int Unchanged => Diff.UnchangedCount;
+
+    /// <summary>Where each of <paramref name="columns"/> sits in the key, or null when the key lacks any of them.</summary>
+    internal int[]? KeyPositions(IReadOnlyList<string> columns)
+    {
+        var positions = columns.Select(c => Target.PrimaryKey.ToList().FindIndex(k => string.Equals(k, c, StringComparison.OrdinalIgnoreCase))).ToArray();
+        return positions.Length > 0 && positions.All(p => p >= 0) ? positions : null;
+    }
+
+    internal TableApplyPlan WithScope(ApplyScope scope)
+    {
+        var positions = KeyPositions(scope.Columns);
+        if (positions is null)
+        {
+            if (!scope.OtherTables.TryGetValue(Target.Name, out var choice))
+                throw new InvalidOperationException(
+                    $"[{Target.Name}] 범위 기준 컬럼({string.Join(", ", scope.Columns)})이 이 테이블의 키에 없습니다. 전부 반영할지 제외할지 정해야 합니다.");
+            return choice == TableScopeChoice.IncludeAll ? this : this with { Diff = new TableDiff(Diff.Table, [], Diff.UnchangedCount) };
+        }
+
+        var rows = Diff.Rows
+            .Where(r => r.Kind != RowDiffKind.Removed && scope.SelectedGroups.Contains(RowKey.Of(positions.Select(i => r.Key[i]))))
+            .ToList();
+        return this with { Diff = new TableDiff(Diff.Table, rows, Diff.UnchangedCount) };
+    }
 
     internal TableApplyPlan WithEdits(IReadOnlyList<CellEdit> edits)
     {
@@ -90,6 +144,57 @@ public sealed record ApplyPlan(
 {
     public int TotalInserts => Tables.Sum(t => t.Inserts);
     public int TotalUpdates => Tables.Sum(t => t.Updates);
+
+    /// <summary>Names of the key columns that tables in the plan have (the columns a scope can be based on), in order of appearance.</summary>
+    public IReadOnlyList<string> KeyColumns => Tables.SelectMany(t => t.Target.PrimaryKey).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>Tables that cannot be grouped by <paramref name="columns"/> because their key lacks one of them.</summary>
+    public IReadOnlyList<string> TablesLacking(IReadOnlyList<string> columns) =>
+        Tables.Where(t => t.KeyPositions(columns) is null).Select(t => t.Target.Name).ToList();
+
+    /// <summary>
+    /// The groups (combinations of the values of <paramref name="columns"/>) that the rows to write belong to, sorted by value,
+    /// with how many inserts and overwrites each has. Only tables whose key has all the columns count.
+    /// </summary>
+    public IReadOnlyList<ScopeGroup> Groups(IReadOnlyList<string> columns)
+    {
+        var found = new Dictionary<string, (object?[] Values, int Inserts, int Updates, HashSet<string> Tables)>();
+        foreach (var table in Tables)
+        {
+            if (table.KeyPositions(columns) is not { } positions) continue;
+            foreach (var row in table.Diff.Rows.Where(r => r.Kind != RowDiffKind.Removed))
+            {
+                var values = positions.Select(i => row.Key[i]).ToArray();
+                var key = RowKey.Of(values);
+                var (v, ins, upd, names) = found.TryGetValue(key, out var existing) ? existing : (values, 0, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                names.Add(table.Target.Name);
+                found[key] = (v, ins + (row.Kind == RowDiffKind.Added ? 1 : 0), upd + (row.Kind == RowDiffKind.Changed ? 1 : 0), names);
+            }
+        }
+
+        return found
+            .OrderBy(g => g.Value.Values, KeyComparer.Instance)
+            .Select(g => new ScopeGroup(new CombinationValue(g.Value.Values.Select(v => v ?? "").ToList()), g.Key, g.Value.Inserts, g.Value.Updates, g.Value.Tables.Count))
+            .ToList();
+    }
+
+    /// <summary>Whether this plan would write the row with this key in this table.</summary>
+    public bool Contains(string table, IReadOnlyList<object?> key)
+    {
+        var text = RowKey.Of(key);
+        return Tables.Any(t => string.Equals(t.Target.Name, table, StringComparison.OrdinalIgnoreCase)
+                               && t.Diff.Rows.Any(r => r.Kind != RowDiffKind.Removed && RowKey.Of(r.Key) == text));
+    }
+
+    /// <summary>
+    /// The plan limited to the groups in <paramref name="scope"/>. Throws <see cref="InvalidOperationException"/> when a table that
+    /// cannot be grouped has no decision in <see cref="ApplyScope.OtherTables"/>. A null or inactive scope changes nothing.
+    /// </summary>
+    public ApplyPlan WithScope(ApplyScope? scope)
+    {
+        if (scope is not { IsActive: true }) return this;
+        return this with { Tables = Tables.Select(t => t.WithScope(scope)).ToList() };
+    }
 
     /// <summary>
     /// The plan as it becomes when the user's hand edits are applied to the patch rows (the patch file itself is untouched).
@@ -176,10 +281,11 @@ public static class MdbApplier
     /// </summary>
     /// <param name="edits">Values the user changed by hand in the preview; they are applied to the patch rows in memory (the patch file is not modified)
     /// and listed in an ".edits.csv" file next to the target after a successful apply.</param>
+    /// <param name="scope">Limits the apply to some groups of rows; applied before the edits, so an edit of a row outside the scope is an error.</param>
     public static ApplyResult Apply(string sourcePath, string targetPath, ApplyMode mode = ApplyMode.Upsert, bool backup = true, AppConfig? config = null,
-        IReadOnlyList<CellEdit>? edits = null)
+        IReadOnlyList<CellEdit>? edits = null, ApplyScope? scope = null)
     {
-        var plan = Preview(sourcePath, targetPath, config).WithEdits(edits);
+        var plan = Preview(sourcePath, targetPath, config).WithScope(scope).WithEdits(edits);
 
         if (mode == ApplyMode.InsertOnly && plan.TotalUpdates > 0)
             throw new InvalidOperationException($"이미 존재하는 행 {plan.TotalUpdates}개가 달라서 삽입 전용 모드로 진행할 수 없습니다.");

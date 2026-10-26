@@ -18,9 +18,14 @@ public static class MdbExtractor
     /// half-made file at the destination (and building never touches a network share or a folder a sync client is watching).
     /// </summary>
     /// <param name="workFolder">Where the file is built before being moved; the system temp folder when null.</param>
-    public static ExtractResult Extract(string sourcePath, string destPath, IReadOnlyList<ColumnFilter> filters, string? workFolder = null)
+    /// <param name="combinations">Filters on the combined values of several columns; a table must satisfy these and <paramref name="filters"/> together.</param>
+    public static ExtractResult Extract(string sourcePath, string destPath, IReadOnlyList<ColumnFilter> filters, string? workFolder = null,
+        IReadOnlyList<CombinationFilter>? combinations = null)
     {
-        if (filters.Count == 0 || filters.Any(f => f.Values.Count == 0))
+        combinations ??= [];
+        if (filters.Count + combinations.Count == 0
+            || filters.Any(f => f.Values.Count == 0)
+            || combinations.Any(c => c.Combinations is { Count: 0 }))
             throw new ArgumentException("필터 조건과 값이 최소 1개 필요합니다.", nameof(filters));
         if (File.Exists(destPath)) throw new IOException($"이미 존재하는 파일입니다: {destPath}");
 
@@ -30,7 +35,7 @@ public static class MdbExtractor
         try
         {
             MdbFile.Create(work);
-            var (extracted, skipped, used) = CopyRows(sourcePath, work, schema, filters);
+            var (extracted, skipped, used) = CopyRows(sourcePath, work, schema, filters, combinations);
             AddPrimaryKeys(work, schema, extracted.Keys);
 
             OleDbConnection.ReleaseObjectPool();   // every connection to the new file must be gone before it is moved
@@ -53,7 +58,7 @@ public static class MdbExtractor
     }
 
     private static (Dictionary<string, int> Extracted, List<string> Skipped, Dictionary<string, IReadOnlyList<string>> Used) CopyRows(
-        string sourcePath, string workPath, DatabaseSchema schema, IReadOnlyList<ColumnFilter> filters)
+        string sourcePath, string workPath, DatabaseSchema schema, IReadOnlyList<ColumnFilter> filters, IReadOnlyList<CombinationFilter> combinations)
     {
         var extracted = new Dictionary<string, int>();
         var skipped = new List<string>();
@@ -63,12 +68,13 @@ public static class MdbExtractor
         using var conn = MdbFile.Open(sourcePath, readOnly: true);
         foreach (var table in schema.Tables)
         {
-            if (filters.Any(f => f.ResolveIn(table) is null)) { skipped.Add(table.Name); continue; }
-            used[table.Name] = filters.Select(f => f.ResolveIn(table)!).ToList();
+            if (filters.Any(f => f.ResolveIn(table) is null) || combinations.Any(c => !c.AppliesTo(table))) { skipped.Add(table.Name); continue; }
+            used[table.Name] = filters.Select(f => f.ResolveIn(table)!)
+                .Concat(combinations.Select(c => string.Join(" + ", c.ResolveIn(table)))).ToList();
 
             using var cmd = conn.CreateCommand();
             var t = MdbFile.Quote(table.Name);
-            cmd.CommandText = $"SELECT * INTO {t} IN '{workPath.Replace("'", "''")}' FROM {t}{MdbReader.WhereClause(cmd, table, filters)}";
+            cmd.CommandText = $"SELECT * INTO {t} IN '{workPath.Replace("'", "''")}' FROM {t}{MdbReader.WhereClause(cmd, table, filters, combinations)}";
             extracted[table.Name] = cmd.ExecuteNonQuery();
         }
         return (extracted, skipped, used);

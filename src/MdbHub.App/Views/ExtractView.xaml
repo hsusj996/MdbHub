@@ -18,6 +18,8 @@
         <!-- 1. source -->
         <DockPanel Grid.Row="0" Margin="0,0,0,8">
             <telerik:RadButton DockPanel.Dock="Left" Content="원본 mdb 선택..." Command="{Binding BrowseSourceCommand}" Padding="12,4" />
+            <telerik:RadButton DockPanel.Dock="Right" Content="+ 조합 필터" Command="{Binding AddCombinationFilterCommand}" Padding="12,4" Margin="8,0,0,0"
+                               ToolTip="여러 컬럼의 값 조합으로 고릅니다 (예: CHEMICAL_NO + SUB_CHEMICAL_NO)" />
             <telerik:RadButton DockPanel.Dock="Right" Content="+ 필터 추가" Command="{Binding AddFilterCommand}" Padding="12,4" Margin="8,0,0,0" />
             <TextBox Text="{Binding SourcePath, Mode=OneWay}" IsReadOnly="True" Margin="8,0,0,0" VerticalContentAlignment="Center" />
         </DockPanel>
@@ -53,7 +55,7 @@
                                 </DockPanel>
                                 <TextBlock Grid.Row="1" Margin="0,4,0,0" TextWrapping="Wrap">
                                     <Run Text="{Binding Name, Mode=OneWay}" FontWeight="Bold" />
-                                    <Run Text="  ▲ 테이블마다 이름이 다를 때만 컬럼을 더 추가" Foreground="#FF666666" FontSize="11" />
+                                    <Run Text="{Binding Hint, Mode=OneWay}" Foreground="#FF666666" FontSize="11" />
                                 </TextBlock>
                                 <ItemsControl Grid.Row="2" Margin="0,4,0,0" ItemsSource="{Binding SelectedColumns}">
                                     <ItemsControl.ItemsPanel>

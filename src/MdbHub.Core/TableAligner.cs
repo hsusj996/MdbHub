@@ -87,7 +87,7 @@ public static class TableAligner
 }
 
 /// <summary>Orders keys component by component: numbers numerically, other equal types naturally, anything else by text.</summary>
-internal sealed class KeyComparer : IComparer<object?[]>
+public sealed class KeyComparer : IComparer<object?[]>
 {
     public static readonly KeyComparer Instance = new();
 

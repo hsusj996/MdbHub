@@ -93,20 +93,73 @@ public static class MdbReader
         return values.Values.Order(MixedTypeComparer.Instance).ToList();
     }
 
-    /// <summary>Builds " WHERE [c] IN (?,?) AND ..." for <paramref name="table"/> and adds the matching parameters to <paramref name="cmd"/>.</summary>
-    internal static string WhereClause(OleDbCommand cmd, TableSchema table, IReadOnlyList<ColumnFilter>? filters)
-    {
-        if (filters is null || filters.Count == 0) return "";
+    /// <summary>The most combinations a check-list will offer; more means the chosen columns are not a sensible grouping.</summary>
+    public const int MaxCombinations = 5000;
 
+    /// <summary>
+    /// Distinct combinations of the given columns (the check-list for combination filters and apply scopes): every table that has
+    /// all of them contributes. Rows with a null in any of the columns are ignored. Sorted by value.
+    /// </summary>
+    public static IReadOnlyList<CombinationValue> GetDistinctCombinations(string path, DatabaseSchema schema, IReadOnlyList<string> columns)
+    {
+        var filter = new CombinationFilter(columns, null);
+        using var conn = MdbFile.Open(path, readOnly: true);
+        var found = new Dictionary<string, object[]>();
+
+        foreach (var table in schema.Tables.Where(filter.AppliesTo))
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT DISTINCT {string.Join(", ", filter.ResolveIn(table).Select(MdbFile.Quote))} FROM {MdbFile.Quote(table.Name)}";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var values = new object[columns.Count];
+                var complete = true;
+                for (var i = 0; i < values.Length && complete; i++)
+                {
+                    if (reader.IsDBNull(i)) complete = false;
+                    else values[i] = reader.GetValue(i);
+                }
+                if (complete) found.TryAdd(RowKey.Of(values), values);
+                if (found.Count > MaxCombinations)
+                    throw new InvalidOperationException($"선택한 컬럼({string.Join(", ", columns)})의 값 조합이 {MaxCombinations:N0}개를 넘습니다. 묶음 기준으로 쓰기에는 너무 세분화된 컬럼입니다.");
+            }
+        }
+
+        return found.Values.OrderBy(v => (object?[])v, KeyComparer.Instance).Select(v => new CombinationValue(v)).ToList();
+    }
+
+    /// <summary>
+    /// Builds " WHERE ..." for <paramref name="table"/>: every column filter as [c] IN (?,?) and every combination filter as
+    /// ([a] = ? AND [b] = ?) OR (...), all joined by AND, and adds the matching parameters to <paramref name="cmd"/>.
+    /// </summary>
+    internal static string WhereClause(OleDbCommand cmd, TableSchema table, IReadOnlyList<ColumnFilter>? filters,
+        IReadOnlyList<CombinationFilter>? combinations = null)
+    {
         var parts = new List<string>();
-        foreach (var f in filters)
+        foreach (var f in filters ?? [])
         {
             var column = f.ResolveIn(table)
                 ?? throw new InvalidOperationException($"테이블 '{table.Name}'에는 필터 컬럼({string.Join(", ", f.Columns)})이 없습니다.");
             parts.Add($"{MdbFile.Quote(column)} IN ({string.Join(",", f.Values.Select(_ => "?"))})");
             foreach (var v in f.Values) cmd.Parameters.AddWithValue("?", v);
         }
-        return " WHERE " + string.Join(" AND ", parts);
+
+        foreach (var c in combinations ?? [])
+        {
+            if (!c.AppliesTo(table))
+                throw new InvalidOperationException($"테이블 '{table.Name}'에는 조합 필터 컬럼({string.Join(", ", c.Columns)})이 없습니다.");
+            if (c.Combinations is null) continue;   // only requires the columns
+            if (c.Combinations.Count == 0) { parts.Add("(1 = 0)"); continue; }   // nothing chosen: nothing matches
+
+            var columns = c.ResolveIn(table);
+            var one = "(" + string.Join(" AND ", columns.Select(col => $"{MdbFile.Quote(col)} = ?")) + ")";
+            parts.Add("(" + string.Join(" OR ", c.Combinations.Select(_ => one)) + ")");
+            foreach (var combination in c.Combinations)
+                foreach (var v in combination) cmd.Parameters.AddWithValue("?", v);
+        }
+
+        return parts.Count == 0 ? "" : " WHERE " + string.Join(" AND ", parts);
     }
 
     /// <summary>Orders numbers numerically, otherwise naturally; values of unrelated types fall back to text order instead of throwing.</summary>

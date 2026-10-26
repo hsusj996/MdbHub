@@ -33,6 +33,23 @@ public static class Dialogs
     public static Func<string, bool> ConfirmHandler { get; set; } =
         message => MessageBox.Show(message, "확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
 
+    /// <summary>
+    /// How the user is asked what to do with tables that cannot be grouped by the chosen scope columns; returns the decision per table,
+    /// or null when cancelled. Replaced in automated checks.
+    /// </summary>
+    public static Func<IReadOnlyList<string>, IReadOnlyList<string>, IReadOnlyDictionary<string, MdbHub.Data.TableScopeChoice>?> ScopeTablesHandler { get; set; } =
+        ShowScopeTablesWindow;
+
+    public static IReadOnlyDictionary<string, MdbHub.Data.TableScopeChoice>? AskScopeTables(IReadOnlyList<string> columns, IReadOnlyList<string> tables) =>
+        ScopeTablesHandler(columns, tables);
+
+    private static IReadOnlyDictionary<string, MdbHub.Data.TableScopeChoice>? ShowScopeTablesWindow(IReadOnlyList<string> columns, IReadOnlyList<string> tables)
+    {
+        var viewModel = new MdbHub.App.ViewModels.ScopeTablesViewModel(columns, tables);
+        var window = new MdbHub.App.Views.ScopeTablesWindow { DataContext = viewModel, Owner = Application.Current?.MainWindow };
+        return window.ShowDialog() == true ? viewModel.ToChoices() : null;
+    }
+
     public static void Info(string message) => InfoHandler(message);
 
     public static bool Confirm(string message) => ConfirmHandler(message);

@@ -23,6 +23,7 @@ public sealed class ExtractViewModel : ViewModelBase
         BrowseSourceCommand = new RelayCommand(_ => BrowseSource(), _ => NotBusy);
         BrowseOutputCommand = new RelayCommand(_ => OutputPath = Dialogs.SaveMdb("추출 결과를 저장할 mdb") ?? OutputPath, _ => NotBusy);
         AddFilterCommand = new RelayCommand(_ => Filters.Add(NewFilter("", [])), _ => _schema is not null && NotBusy);
+        AddCombinationFilterCommand = new RelayCommand(_ => Filters.Add(NewFilter("조합", [], combination: true)), _ => _schema is not null && NotBusy);
         RemoveFilterCommand = new RelayCommand(f => Filters.Remove((FilterViewModel)f!));
         ExtractCommand = new RelayCommand(_ => Extract(), _ => NotBusy);
     }
@@ -34,6 +35,7 @@ public sealed class ExtractViewModel : ViewModelBase
     public ICommand BrowseSourceCommand { get; }
     public ICommand BrowseOutputCommand { get; }
     public ICommand AddFilterCommand { get; }
+    public ICommand AddCombinationFilterCommand { get; }
     public ICommand RemoveFilterCommand { get; }
     public ICommand ExtractCommand { get; }
 
@@ -55,12 +57,15 @@ public sealed class ExtractViewModel : ViewModelBase
         private set => Set(ref _summary, value);
     }
 
-    private FilterViewModel NewFilter(string name, IEnumerable<string> columns) =>
+    private FilterViewModel NewFilter(string name, IEnumerable<string> columns, bool combination = false) =>
         new(name,
             AvailableColumns.ToList(),
-            cols => Task.Run(() => MdbReader.GetDistinctValues(_sourcePath!, _schema!, cols)),
-            Coverage,
-            columns);
+            combination
+                ? cols => Task.Run(() => (IReadOnlyList<object>)MdbReader.GetDistinctCombinations(_sourcePath!, _schema!, cols).Cast<object>().ToList())
+                : cols => Task.Run(() => MdbReader.GetDistinctValues(_sourcePath!, _schema!, cols)),
+            combination ? CombinationCoverage : Coverage,
+            columns,
+            combination);
 
     // Tables that have none of the filter's columns are skipped by an extract, so show them up front.
     private FilterCoverage Coverage(IReadOnlyList<string> columns)
@@ -70,12 +75,23 @@ public sealed class ExtractViewModel : ViewModelBase
         return new FilterCoverage(_schema.Tables.Count - skipped.Count, _schema.Tables.Count, skipped);
     }
 
+    // A combination needs every one of its columns: a table lacking any of them is skipped.
+    private FilterCoverage CombinationCoverage(IReadOnlyList<string> columns)
+    {
+        var filter = new CombinationFilter(columns, null);
+        var skipped = _schema!.Tables.Where(t => !filter.AppliesTo(t)).Select(t => t.Name).ToList();
+        return new FilterCoverage(_schema.Tables.Count - skipped.Count, _schema.Tables.Count, skipped);
+    }
+
     private void BrowseSource()
     {
         var path = Dialogs.OpenMdb("추출할 원본 mdb 선택");
-        if (path is null) return;
+        if (path is not null) _ = OpenSourceAsync(path);
+    }
 
-        _ = RunAsync(async () =>
+    /// <summary>Reads the mdb's tables and fills the filter cards from the config (what choosing the file in the dialog does).</summary>
+    public Task OpenSourceAsync(string path) =>
+        RunAsync(async () =>
         {
             var schema = await Task.Run(() => MdbReader.ReadSchema(path));
             _schema = schema;
@@ -104,7 +120,11 @@ public sealed class ExtractViewModel : ViewModelBase
             if (notInThisMdb.Count > 0)
                 Summary += $"  (설정의 필터 {string.Join(", ", notInThisMdb.Select(n => $"'{n}'"))}은(는) 이 mdb에 해당 컬럼이 없어 만들지 않았습니다.)";
         });
-    }
+
+    // Checking every combination means "any value", but the columns are still required: tables without them are skipped.
+    private static CombinationFilter ToCombinationFilter(FilterViewModel f) =>
+        new(f.SelectedColumns.ToList(),
+            f.SelectedCount == f.TotalCount ? null : f.SelectedValues.Cast<CombinationValue>().Select(c => c.Values).ToList());
 
     private void Extract()
     {
@@ -113,16 +133,15 @@ public sealed class ExtractViewModel : ViewModelBase
         if (File.Exists(_outputPath)) { Dialogs.Error("이미 존재하는 파일입니다. 다른 이름을 지정하세요."); return; }
 
         // A filter with nothing checked is ignored (like "select all"), so at least one filter must restrict something.
-        var filters = Filters
-            .Where(f => f.SelectedColumns.Count > 0 && f.SelectedCount > 0)
-            .Select(f => new ColumnFilter(f.SelectedColumns.ToList(), f.SelectedValues))
-            .ToList();
-        if (filters.Count == 0) { Dialogs.Error("추출할 값을 하나 이상 체크하세요."); return; }
+        var active = Filters.Where(f => f.SelectedColumns.Count > 0 && f.SelectedCount > 0).ToList();
+        var filters = active.Where(f => !f.IsCombination).Select(f => new ColumnFilter(f.SelectedColumns.ToList(), f.SelectedValues)).ToList();
+        var combinations = active.Where(f => f.IsCombination).Select(ToCombinationFilter).ToList();
+        if (filters.Count + combinations.Count == 0) { Dialogs.Error("추출할 값을 하나 이상 체크하세요."); return; }
 
         var (source, output) = (_sourcePath, _outputPath);
         _ = RunAsync(async () =>
         {
-            var result = await Task.Run(() => MdbExtractor.Extract(source, output, filters));
+            var result = await Task.Run(() => MdbExtractor.Extract(source, output, filters, combinations: combinations));
 
             Results.Clear();
             foreach (var (table, rows) in result.ExtractedRows)

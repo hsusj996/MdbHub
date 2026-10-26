@@ -53,8 +53,10 @@ public sealed class FilterViewModel : ObservableObject
         IReadOnlyList<string> availableColumns,
         Func<IReadOnlyList<string>, Task<IReadOnlyList<object>>> loadValues,
         Func<IReadOnlyList<string>, FilterCoverage> coverage,
-        IEnumerable<string> initialColumns)
+        IEnumerable<string> initialColumns,
+        bool isCombination = false)
     {
+        IsCombination = isCombination;
         Name = name;
         AvailableColumns = availableColumns;
         _loadValues = loadValues;
@@ -66,6 +68,16 @@ public sealed class FilterViewModel : ObservableObject
         foreach (var column in initialColumns) SelectedColumns.Add(column);
         if (SelectedColumns.Count > 0) _ = ReloadAsync();   // one load for all initial columns
     }
+
+    /// <summary>
+    /// True when the columns together form combinations to choose from (e.g. CHEMICAL_NO + SUB_CHEMICAL_NO → "100 | 1"),
+    /// false when they are aliases of one column whose single values are listed.
+    /// </summary>
+    public bool IsCombination { get; }
+
+    public string Hint => IsCombination
+        ? "  ▲ 컬럼을 여러 개 넣으면 그 값의 조합으로 고릅니다"
+        : "  ▲ 테이블마다 이름이 다를 때만 컬럼을 더 추가";
 
     /// <summary>Title of the filter card: the config's filter name, or empty for a filter the user added by hand.</summary>
     public string Name { get; }

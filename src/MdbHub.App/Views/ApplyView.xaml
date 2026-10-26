@@ -36,6 +36,74 @@
         </StackPanel>
 
         <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- scope: apply only some groups of rows (combinations of the values of key columns the user picks) -->
+            <Border Grid.Column="0" Width="290" Margin="0,0,8,0" Padding="8" BorderBrush="#FFBBBBBB" BorderThickness="1" CornerRadius="3"
+                    Visibility="{Binding HasPlan, Converter={StaticResource BoolToVis}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="반영 범위" FontWeight="Bold" />
+                    <TextBlock Grid.Row="1" Margin="0,2,0,6" TextWrapping="Wrap" Foreground="#FF666666" FontSize="11"
+                               Text="기준 컬럼을 고르면 그 값의 조합을 체크해서 일부만 반영할 수 있습니다. 비워 두면 전부 반영합니다." />
+                    <ComboBox Grid.Row="2" ItemsSource="{Binding AvailableScopeColumns}" SelectedItem="{Binding ScopeColumnToAdd}"
+                              ToolTip="기준 컬럼 추가 (예: CHEMICAL_NO, SUB_CHEMICAL_NO 또는 CHEM_ID). 여러 개를 넣으면 그 값의 조합이 됩니다." />
+                    <ItemsControl Grid.Row="3" Margin="0,6,0,0" ItemsSource="{Binding ScopeColumns}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,4,4" Padding="6,1,2,1" Background="#FFE3EEFA" BorderBrush="#FF9DBBE0" BorderThickness="1" CornerRadius="9">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                                        <Button Content="✕" Margin="4,0,0,0" Padding="3,0" BorderThickness="0" Background="Transparent" ToolTip="이 컬럼 빼기"
+                                                Command="{Binding DataContext.RemoveScopeColumnCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Grid.Row="4" Text="{Binding ScopeText}" FontWeight="Bold" Foreground="#FF1E5FA8" Margin="0,2,0,4"
+                               Visibility="{Binding HasScopeColumns, Converter={StaticResource BoolToVis}}" />
+                    <StackPanel Grid.Row="5" Visibility="{Binding HasScopeColumns, Converter={StaticResource BoolToVis}}">
+                        <TextBox Text="{Binding ScopeSearch, UpdateSourceTrigger=PropertyChanged}" ToolTip="조합 검색" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,6">
+                            <Button Content="표시된 항목 모두 선택" Padding="8,2" Command="{Binding SelectAllGroupsCommand}" />
+                            <Button Content="해제" Padding="8,2" Margin="6,0,0,0" Command="{Binding ClearGroupsCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                    <ListBox Grid.Row="6" ItemsSource="{Binding ScopeGroupsView}" VirtualizingPanel.IsVirtualizing="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             Visibility="{Binding HasScopeColumns, Converter={StaticResource BoolToVis}}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,1">
+                                    <CheckBox IsChecked="{Binding IsSelected}" Content="{Binding Text}" />
+                                    <TextBlock Text="{Binding Detail}" Margin="20,0,0,0" FontSize="11" Foreground="#FF777777" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="200" MinHeight="90" />
                 <RowDefinition Height="6" />
@@ -92,6 +160,7 @@
                         <TextBlock Text="불러오는 중..." FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                 </Grid>
+            </Grid>
             </Grid>
         </Grid>
 
