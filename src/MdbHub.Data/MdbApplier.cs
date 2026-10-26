@@ -134,8 +134,8 @@ public static class MdbApplier
 
         // The patch may hold only some tables, so compare just those against the target.
         var targetSubset = targetSchema.Tables.Where(t => sourceTables.Any(s => string.Equals(s.Name, t.Name, StringComparison.OrdinalIgnoreCase))).ToList();
-        var differences = SchemaValidator.Compare(new DatabaseSchema(sourceTables), new DatabaseSchema(targetSubset));
-        if (differences.Count > 0) throw new SchemaMismatchException(differences);
+        var differences = SchemaValidator.Compare(new DatabaseSchema(sourceTables), new DatabaseSchema(targetSubset), "반영할 mdb", "대상 mdb");
+        if (differences.Count > 0) throw new SchemaMismatchException(differences, "반영할 mdb와 대상 mdb");
 
         var tables = sourceTables.Select(s =>
         {

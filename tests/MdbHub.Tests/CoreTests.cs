@@ -42,6 +42,43 @@ public class CoreTests
     }
 
     [Fact]
+    public void SchemaValidator_UsesTheGivenSideNames_InsteadOfLeftAndRight()
+    {
+        var patch = new DatabaseSchema(
+        [
+            new TableSchema("T", [new("ID", "Integer"), new("V", "Double"), new("ONLY_PATCH", "Integer")], ["ID"]),
+            Table("PATCH_ONLY_TABLE", "ID"),
+        ]);
+        var target = new DatabaseSchema(
+        [
+            new TableSchema("T", [new("ID", "Integer"), new("V", "Integer"), new("ONLY_TARGET", "Integer")], ["ID", "V"]),
+        ]);
+
+        var diffs = SchemaValidator.Compare(patch, target, "반영할 mdb", "대상 mdb");
+
+        Assert.Contains("테이블 'PATCH_ONLY_TABLE'이(가) 대상 mdb에 없습니다.", diffs);
+        Assert.Contains("[T] 컬럼 'ONLY_PATCH'이(가) 대상 mdb에 없습니다.", diffs);
+        Assert.Contains("[T] 컬럼 'ONLY_TARGET'이(가) 반영할 mdb에 없습니다.", diffs);
+        Assert.Contains(diffs, d => d.Contains("'V' 타입 불일치") && d.Contains("반영할 mdb Double") && d.Contains("대상 mdb Integer"));
+        Assert.Contains(diffs, d => d.Contains("키 불일치") && d.Contains("반영할 mdb (ID)") && d.Contains("대상 mdb (ID, V)"));
+        Assert.DoesNotContain(diffs, d => d.Contains("왼쪽") || d.Contains("오른쪽"));
+    }
+
+    [Fact]
+    public void SchemaMismatchException_ShowsTheFirstDifferences_AndKeepsAllOfThem()
+    {
+        var many = Enumerable.Range(1, 35).Select(i => $"차이 {i}").ToList();
+
+        var ex = new SchemaMismatchException(many, "반영할 mdb와 대상 mdb");
+
+        Assert.Equal(35, ex.Differences.Count);
+        Assert.StartsWith("반영할 mdb와 대상 mdb의 스키마가 달라 진행할 수 없습니다 (35건)", ex.Message);
+        Assert.Contains("차이 20", ex.Message);
+        Assert.DoesNotContain("차이 21", ex.Message);
+        Assert.Contains("외 15건", ex.Message);
+    }
+
+    [Fact]
     public void TableComparer_FindsAddedRemovedChangedAndUnchanged()
     {
         var s = Table("T", "ID", "V");

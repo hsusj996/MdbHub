@@ -124,6 +124,60 @@ public class MdbDataTests : TempDirTestBase
     }
 
     [Fact]
+    public void Create_LeavesTheNewFileClosed_SoItCanBeOpenedExclusivelyAndDeletedAtOnce()
+    {
+        MdbFile.Create(P("fresh.mdb"));
+
+        // no GC, no waiting: ADOX's connection used to stay open on the new file until the garbage collector ran
+        using (var exclusive = new FileStream(P("fresh.mdb"), FileMode.Open, FileAccess.Read, FileShare.None)) { }
+        File.Delete(P("fresh.mdb"));
+        Assert.False(File.Exists(P("fresh.mdb")));
+    }
+
+    [Fact]
+    public void Extract_BuildsInTheWorkFolderAndMovesTheFinishedFile_LeavingNothingBehind()
+    {
+        SampleMdbBuilder.Create(P("src.mdb"), Chemicals, rowsPerChemical: 5);
+        var work = Directory.CreateDirectory(P("work")).FullName;
+        var dest = P(Path.Combine("new folder", "out.mdb"));   // the destination folder does not exist yet
+
+        var result = MdbExtractor.Extract(P("src.mdb"), dest, [new ColumnFilter("CHEMICAL_NO", [100])], work);
+
+        Assert.True(File.Exists(dest));
+        Assert.Equal(SampleMdbBuilder.KeyedTableCount, result.ExtractedRows.Count);
+        Assert.Empty(Directory.GetFiles(work));                                  // nothing left in the work folder
+    }
+
+    [Fact]
+    public void Extract_WhenTheLastStepFails_ShowsTheRealError_AndLeavesNoFileAnywhere()
+    {
+        SampleMdbBuilder.Create(P("src.mdb"), Chemicals, rowsPerChemical: 5);
+        var work = Directory.CreateDirectory(P("work")).FullName;
+        File.WriteAllText(P("blocker"), "a file where the destination folder should be");   // the finished file cannot be put anywhere
+
+        // everything is built successfully first; only moving the finished file into place fails
+        var ex = Assert.ThrowsAny<Exception>(() =>
+            MdbExtractor.Extract(P("src.mdb"), P(Path.Combine("blocker", "out.mdb")), [new ColumnFilter("CHEMICAL_NO", [100])], work));
+
+        Assert.IsAssignableFrom<IOException>(ex);
+        Assert.DoesNotContain("임시 파일을 지우지 못했습니다", ex.Message);               // the work file could be removed, so no extra warning
+        Assert.False(File.Exists(P(Path.Combine("blocker", "out.mdb"))));
+        Assert.Empty(Directory.GetFiles(work));                                          // the finished work file was cleaned up
+    }
+
+    [Fact]
+    public void Extract_WhenTheWorkFileCannotBeCreated_FailsWithTheRealError_AndNoDestination()
+    {
+        SampleMdbBuilder.Create(P("src.mdb"), Chemicals, rowsPerChemical: 5);
+
+        var ex = Assert.ThrowsAny<Exception>(() =>
+            MdbExtractor.Extract(P("src.mdb"), P("out.mdb"), [new ColumnFilter("CHEMICAL_NO", [100])], P("no such work folder")));
+
+        Assert.False(File.Exists(P("out.mdb")));
+        Assert.DoesNotContain("다른 프로세스", ex.Message);
+    }
+
+    [Fact]
     public void Extract_WithNoMatchingRows_StillCreatesTables()
     {
         SampleMdbBuilder.Create(P("src.mdb"), Chemicals);

@@ -132,6 +132,32 @@ public class MdbApplierTests : TempDirTestBase
     }
 
     [Fact]
+    public void Apply_SchemaMismatch_NamesThePatchAndTheTarget_NotLeftAndRight()
+    {
+        CreateTargetAndPatch();
+        foreach (var (path, sql) in new[]
+        {
+            (P("patch.mdb"), "ALTER TABLE TB_SPEC_02 ADD COLUMN ONLY_IN_PATCH TEXT(10)"),
+            (P("target.mdb"), "ALTER TABLE TB_SPEC_03 ADD COLUMN ONLY_IN_TARGET TEXT(10)"),
+            (P("patch.mdb"), "CREATE TABLE TB_ONLY_PATCH (ID LONG, CONSTRAINT PK_OP PRIMARY KEY (ID))"),
+        })
+        {
+            using var conn = MdbFile.Open(path);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+
+        var ex = Assert.Throws<SchemaMismatchException>(() => MdbApplier.Preview(P("patch.mdb"), P("target.mdb")));
+
+        Assert.Contains("[TB_SPEC_02] 컬럼 'ONLY_IN_PATCH'이(가) 대상 mdb에 없습니다.", ex.Differences);
+        Assert.Contains("[TB_SPEC_03] 컬럼 'ONLY_IN_TARGET'이(가) 반영할 mdb에 없습니다.", ex.Differences);
+        Assert.Contains("테이블 'TB_ONLY_PATCH'이(가) 대상 mdb에 없습니다.", ex.Differences);
+        Assert.DoesNotContain(ex.Differences, d => d.Contains("왼쪽") || d.Contains("오른쪽"));
+        Assert.StartsWith("반영할 mdb와 대상 mdb의 스키마가 달라", ex.Message);
+    }
+
+    [Fact]
     public void Apply_PatchWithSubsetOfTables_OnlyTouchesThoseTables()
     {
         SampleMdbBuilder.Create(P("target.mdb"), TargetChemicals, Rows);

@@ -21,7 +21,8 @@ mdbhub.config.json.tmp
 *.edits.csv
 *.merge.csv
 
-# Samples: only the small ones are committed. Recreate the rest with tools/MdbHub.SampleGen (see README).
-samples/sample_max.mdb
-samples/*.bak.mdb
-samples/sample_a_after_max_apply.mdb
+# Samples: only sample_a.mdb and sample_b.mdb are committed; any other mdb dropped here (test output, backups,
+# the big sample) stays out. Recreate the big one with tools/MdbHub.SampleGen (see README).
+samples/*.mdb
+!samples/sample_a.mdb
+!samples/sample_b.mdb
