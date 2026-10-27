@@ -1,4 +1,4 @@
-using System.Data.OleDb;
+﻿using System.Data.OleDb;
 
 namespace MdbHub.Data;
 
@@ -9,11 +9,21 @@ public static class MdbFile
     public static string ConnectionString(string path, bool readOnly = false) =>
         $"Provider={Provider};Data Source={path};" + (readOnly ? "Mode=Read;" : "");
 
+    // The Access engine fails now and then with "unspecified error" when several threads set up connections (or create files, or
+    // flush the connection pool) at the same moment. Setting up a connection is quick, so these steps take turns; queries run freely.
+    private static readonly object EngineLock = new();
+
     public static OleDbConnection Open(string path, bool readOnly = false)
     {
         var conn = new OleDbConnection(ConnectionString(path, readOnly));
-        conn.Open();
+        lock (EngineLock) conn.Open();
         return conn;
+    }
+
+    /// <summary>Closes pooled connections so their files are released (before deleting or moving a file). Takes its turn like <see cref="Open"/>.</summary>
+    public static void ReleasePool()
+    {
+        lock (EngineLock) OleDbConnection.ReleaseObjectPool();
     }
 
     /// <summary>
@@ -25,24 +35,28 @@ public static class MdbFile
 
         var type = Type.GetTypeFromProgID("ADOX.Catalog")
             ?? throw new InvalidOperationException("ADOX를 사용할 수 없습니다. Access Database Engine(64비트) 설치를 확인하세요.");
-        dynamic catalog = Activator.CreateInstance(type)!;
-        object? connection = null;
-        try
+
+        lock (EngineLock)
         {
-            // Catalog.Create hands back the ADO connection that is open on the new file. It must be closed and released here:
-            // otherwise the file stays open (and cannot even be deleted) until the garbage collector happens to run, and an engine
-            // that refuses a second connection to it fails later with "already open".
-            connection = catalog.Create($"Provider={Provider};Data Source={path};Jet OLEDB:Engine Type=5;");
-        }
-        finally
-        {
-            if (connection is not null)
+            dynamic catalog = Activator.CreateInstance(type)!;
+            object? connection = null;
+            try
             {
-                try { ((dynamic)connection).Close(); }
-                catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { }
-                System.Runtime.InteropServices.Marshal.FinalReleaseComObject(connection);
+                // Catalog.Create hands back the ADO connection that is open on the new file. It must be closed and released here:
+                // otherwise the file stays open (and cannot even be deleted) until the garbage collector happens to run, and an engine
+                // that refuses a second connection to it fails later with "already open".
+                connection = catalog.Create($"Provider={Provider};Data Source={path};Jet OLEDB:Engine Type=5;");
             }
-            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(catalog);
+            finally
+            {
+                if (connection is not null)
+                {
+                    try { ((dynamic)connection).Close(); }
+                    catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { }
+                    System.Runtime.InteropServices.Marshal.FinalReleaseComObject(connection);
+                }
+                System.Runtime.InteropServices.Marshal.FinalReleaseComObject(catalog);
+            }
         }
     }
 
@@ -61,7 +75,7 @@ public static class MdbFile
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                OleDbConnection.ReleaseObjectPool();
+                ReleasePool();
                 Thread.Sleep(150);
             }
         }
@@ -70,3 +84,4 @@ public static class MdbFile
 
     internal static string Quote(string identifier) => $"[{identifier.Replace("]", "]]")}]";
 }
+

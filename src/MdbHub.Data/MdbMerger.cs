@@ -1,4 +1,4 @@
-using System.Data.OleDb;
+﻿using System.Data.OleDb;
 using System.Text;
 using MdbHub.Core;
 
@@ -41,7 +41,7 @@ public static class MdbMerger
         }
         catch (Exception ex)
         {
-            OleDbConnection.ReleaseObjectPool();   // let go of the files before putting backups over them
+            MdbFile.ReleasePool();   // let go of the files before putting backups over them
             var failed = new List<string>();
             foreach (var done in written)
             {
@@ -160,3 +160,4 @@ public static class MdbMerger
         return path;
     }
 }
+

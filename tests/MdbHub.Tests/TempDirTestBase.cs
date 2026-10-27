@@ -1,4 +1,4 @@
-using System.Data.OleDb;
+﻿using MdbHub.Data;
 
 namespace MdbHub.Tests;
 
@@ -10,7 +10,7 @@ public abstract class TempDirTestBase : IDisposable
 
     public void Dispose()
     {
-        OleDbConnection.ReleaseObjectPool();   // let go of pooled file locks before deleting
+        MdbFile.ReleasePool();   // let go of pooled file locks before deleting
         GC.Collect();
         GC.WaitForPendingFinalizers();
         Directory.Delete(_dir, recursive: true);

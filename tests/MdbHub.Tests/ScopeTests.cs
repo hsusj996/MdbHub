@@ -249,6 +249,131 @@ public class ScopeTests : TempDirTestBase
         Assert.All(rows, r => Assert.Equal(2, r[2]));
     }
 
+    // ---- extract: copy methods and keys that an engine may not support (issue #1) ----
+
+    private static (Dictionary<string, int> Rows, string[] KeyColumns) Describe(string path, string table)
+    {
+        var schema = MdbReader.ReadSchema(path).Find(table)!;
+        return (new Dictionary<string, int> { ["rows"] = MdbReader.ReadTable(path, schema).Rows.Count }, schema.PrimaryKey.ToArray());
+    }
+
+    [Theory]
+    [InlineData(ExtractCopyMethod.ParametersIntoExternal)]
+    [InlineData(ExtractCopyMethod.LiteralsIntoExternal)]
+    [InlineData(ExtractCopyMethod.LiteralsFromExternal)]
+    public void Extract_EachCopyMethodAlone_GivesTheSameFileWithItsKeys(ExtractCopyMethod method)
+    {
+        CreateFiles();
+        ColumnFilter[] filters = [new("CHEMICAL_NO", [100, 200]), new("NUM", [2, 3])];
+        CombinationFilter[] combos = [new(Group, [[100, 1], [200, 2]])];
+
+        var result = MdbExtractor.Extract(P("patch.mdb"), P("out.mdb"), filters, combinations: combos, methods: [method]);
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(new Dictionary<(int, int), int> { [(100, 1)] = 2, [(200, 2)] = 2 }, RowsPerGroup(P("out.mdb"), "TB_SPEC_01"));
+        var (rows, key) = Describe(P("out.mdb"), "TB_SPEC_01");
+        Assert.Equal(4, rows["rows"]);
+        Assert.Equal(["CHEMICAL_NO", "SUB_CHEMICAL_NO", "NUM"], key);
+        Assert.Equal(KeyedTables, result.ExtractedRows.Count);
+    }
+
+    [Fact]
+    public void Extract_LiteralMethods_HandleTextDatesAndQuotesInValues()
+    {
+        MdbFile.Create(P("src.mdb"));
+        Sql(P("src.mdb"),
+            "CREATE TABLE TB_TXT (NAME TEXT(30), D DATETIME, F YESNO, AMOUNT DOUBLE, ID LONG, CONSTRAINT PK_TXT PRIMARY KEY (NAME, D))",
+            "INSERT INTO TB_TXT VALUES ('O''Brien', #2025-03-04 10:20:30#, True, 1.5, 1)",
+            "INSERT INTO TB_TXT VALUES ('plain', #2025-03-04 10:20:30#, False, 2.5, 2)");
+        ColumnFilter[] filters = [new("NAME", ["O'Brien"]), new("D", [new DateTime(2025, 3, 4, 10, 20, 30)]), new("F", [true]), new("AMOUNT", [1.5])];
+
+        foreach (var method in new[] { ExtractCopyMethod.LiteralsIntoExternal, ExtractCopyMethod.LiteralsFromExternal })
+        {
+            var dest = P($"out_{method}.mdb");
+            MdbExtractor.Extract(P("src.mdb"), dest, filters, methods: [method]);
+
+            var rows = MdbReader.ReadTable(dest, MdbReader.ReadSchema(dest).Find("TB_TXT")!).Rows;
+            Assert.Equal("O'Brien", Assert.Single(rows)[0]);
+        }
+    }
+
+    [Fact]
+    public void Extract_WhenOneCopyMethodIsNotSupported_TriesTheNextAndSaysSo()
+    {
+        CreateFiles();
+        var failed = new List<string>();
+        MdbExtractor.BeforeCopyAttempt = (method, table) =>
+        {
+            if (method == ExtractCopyMethod.ParametersIntoExternal) { failed.Add(table); throw new NotSupportedException("simulated: 이 개체 형식에서는 지원되지 않는 작업입니다"); }
+        };
+        try
+        {
+            var result = MdbExtractor.Extract(P("patch.mdb"), P("out.mdb"), [new ColumnFilter("CHEMICAL_NO", [100])]);
+
+            Assert.Equal(KeyedTables, result.ExtractedRows.Count);
+            Assert.Equal(3 * 2, RowsPerGroup(P("out.mdb"), "TB_SPEC_01").Values.Sum());
+            Assert.Single(failed);                                          // only the first table tried the method that fails: later tables start with the one that worked
+            var warning = Assert.Single(result.Warnings);
+            Assert.Contains("지원되지 않는 작업", warning);                  // the engine's own wording, so it can be reported
+            Assert.Contains("[TB_SPEC_01]", warning);
+        }
+        finally { MdbExtractor.BeforeCopyAttempt = null; }
+    }
+
+    [Fact]
+    public void Extract_WhenEveryCopyMethodFails_ListsEachAttemptAndLeavesNoFile()
+    {
+        CreateFiles();
+        var work = Directory.CreateDirectory(P("work")).FullName;
+        MdbExtractor.BeforeCopyAttempt = (method, _) => throw new NotSupportedException($"simulated failure of {method}");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                MdbExtractor.Extract(P("patch.mdb"), P("out.mdb"), [new ColumnFilter("CHEMICAL_NO", [100])], work));
+
+            Assert.Contains("데이터 복사 단계", ex.Message);
+            Assert.Contains("[TB_SPEC_01]", ex.Message);
+            foreach (var method in Enum.GetValues<ExtractCopyMethod>()) Assert.Contains($"simulated failure of {method}", ex.Message);
+            Assert.False(File.Exists(P("out.mdb")));
+            Assert.Empty(Directory.GetFiles(work));
+        }
+        finally { MdbExtractor.BeforeCopyAttempt = null; }
+    }
+
+    [Fact]
+    public void Extract_WhenAlterTableKeyIsNotSupported_CreatesTheKeyAnotherWay()
+    {
+        CreateFiles();
+        MdbExtractor.BeforeKeyAttempt = (attempt, _) => { if (attempt == 0) throw new NotSupportedException("simulated 3251 on ALTER TABLE"); };
+        try
+        {
+            var result = MdbExtractor.Extract(P("patch.mdb"), P("out.mdb"), [new ColumnFilter("CHEMICAL_NO", [100])]);
+
+            Assert.Empty(result.Warnings);
+            Assert.Empty(result.TablesWithoutKey);
+            Assert.Equal(["CHEMICAL_NO", "SUB_CHEMICAL_NO", "NUM"], MdbReader.ReadSchema(P("out.mdb")).Find("TB_SPEC_05")!.PrimaryKey);
+        }
+        finally { MdbExtractor.BeforeKeyAttempt = null; }
+    }
+
+    [Fact]
+    public void Extract_WhenNoKeyCanBeCreated_StillDeliversTheDataWithAWarning()
+    {
+        CreateFiles();
+        MdbExtractor.BeforeKeyAttempt = (_, _) => throw new NotSupportedException("simulated: no key syntax works");
+        try
+        {
+            var result = MdbExtractor.Extract(P("patch.mdb"), P("out.mdb"), [new ColumnFilter("CHEMICAL_NO", [100])]);
+
+            Assert.True(File.Exists(P("out.mdb")));
+            Assert.Equal(KeyedTables, result.TablesWithoutKey.Count);
+            Assert.Equal(KeyedTables, result.Warnings.Count(w => w.Contains("키 없이 추출했습니다")));
+            Assert.Empty(MdbReader.ReadSchema(P("out.mdb")).Find("TB_SPEC_01")!.PrimaryKey);
+            Assert.Equal(6, MdbReader.ReadTable(P("out.mdb"), MdbReader.ReadSchema(P("out.mdb")).Find("TB_SPEC_01")!).Rows.Count);   // the rows are all there
+        }
+        finally { MdbExtractor.BeforeKeyAttempt = null; }
+    }
+
     [Fact]
     public void Extract_WithNothingToFilterOn_OrAnEmptyCombinationList_IsRejected()
     {

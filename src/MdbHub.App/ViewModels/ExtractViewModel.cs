@@ -145,11 +145,16 @@ public sealed class ExtractViewModel : ViewModelBase
 
             Results.Clear();
             foreach (var (table, rows) in result.ExtractedRows)
-                Results.Add(new ExtractRow(table, $"{rows:N0}행   (필터 컬럼: {string.Join(", ", result.FilterColumns[table])})"));
+            {
+                var noKey = result.TablesWithoutKey.Contains(table, StringComparer.OrdinalIgnoreCase) ? "   ⚠ 키를 만들지 못해 키 없이 추출됨" : "";
+                Results.Add(new ExtractRow(table, $"{rows:N0}행   (필터 컬럼: {string.Join(", ", result.FilterColumns[table])}){noKey}"));
+            }
             foreach (var table in result.SkippedTables) Results.Add(new ExtractRow(table, "건너뜀 (필터 컬럼 없음)"));
 
             var total = result.ExtractedRows.Values.Sum();
             Summary = $"추출 완료: 테이블 {result.ExtractedRows.Count}개, 총 {total:N0}행 → {output}";
+            if (result.Warnings.Count > 0)
+                Summary += "\n⚠ " + string.Join("\n⚠ ", result.Warnings) + "\n   (데이터는 정상적으로 추출되었습니다. 이 메시지를 보고해 주시면 원인을 찾는 데 도움이 됩니다.)";
             if (total == 0) Dialogs.Info("조건에 맞는 행이 없어 빈 테이블만 만들어졌습니다.");
         });
     }

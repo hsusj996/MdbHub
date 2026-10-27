@@ -133,16 +133,24 @@ public static class MdbReader
     /// Builds " WHERE ..." for <paramref name="table"/>: every column filter as [c] IN (?,?) and every combination filter as
     /// ([a] = ? AND [b] = ?) OR (...), all joined by AND, and adds the matching parameters to <paramref name="cmd"/>.
     /// </summary>
+    /// <param name="inlineValues">Write the values into the SQL instead of passing them as parameters.</param>
     internal static string WhereClause(OleDbCommand cmd, TableSchema table, IReadOnlyList<ColumnFilter>? filters,
-        IReadOnlyList<CombinationFilter>? combinations = null)
+        IReadOnlyList<CombinationFilter>? combinations = null, bool inlineValues = false)
     {
+        // A value is either a "?" with a parameter, or its literal text.
+        string Value(object v)
+        {
+            if (inlineValues) return SqlLiteral.Of(v);
+            cmd.Parameters.AddWithValue("?", v);
+            return "?";
+        }
+
         var parts = new List<string>();
         foreach (var f in filters ?? [])
         {
             var column = f.ResolveIn(table)
                 ?? throw new InvalidOperationException($"테이블 '{table.Name}'에는 필터 컬럼({string.Join(", ", f.Columns)})이 없습니다.");
-            parts.Add($"{MdbFile.Quote(column)} IN ({string.Join(",", f.Values.Select(_ => "?"))})");
-            foreach (var v in f.Values) cmd.Parameters.AddWithValue("?", v);
+            parts.Add($"{MdbFile.Quote(column)} IN ({string.Join(",", f.Values.Select(Value))})");
         }
 
         foreach (var c in combinations ?? [])
@@ -153,10 +161,9 @@ public static class MdbReader
             if (c.Combinations.Count == 0) { parts.Add("(1 = 0)"); continue; }   // nothing chosen: nothing matches
 
             var columns = c.ResolveIn(table);
-            var one = "(" + string.Join(" AND ", columns.Select(col => $"{MdbFile.Quote(col)} = ?")) + ")";
-            parts.Add("(" + string.Join(" OR ", c.Combinations.Select(_ => one)) + ")");
-            foreach (var combination in c.Combinations)
-                foreach (var v in combination) cmd.Parameters.AddWithValue("?", v);
+            var alternatives = c.Combinations.Select(combination =>
+                "(" + string.Join(" AND ", columns.Select((col, i) => $"{MdbFile.Quote(col)} = {Value(combination[i])}")) + ")");
+            parts.Add("(" + string.Join(" OR ", alternatives) + ")");
         }
 
         return parts.Count == 0 ? "" : " WHERE " + string.Join(" AND ", parts);
